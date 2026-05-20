@@ -77,6 +77,5 @@ CREATE TABLE
         PRIMARY KEY (id)
     );
 
-CREATE TABLE hibernate_sequence (next_val BIGINT NOT NULL);
-
-INSERT INTO hibernate_sequence (next_val) VALUES (0);
+-- hibernate_sequence table removed — using GenerationType.IDENTITY (auto-increment) with Hibernate 6
+-- Legacy databases: ensure AUTO_INCREMENT values start above highest existing ID
