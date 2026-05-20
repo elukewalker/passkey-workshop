@@ -8,7 +8,9 @@ This project requires
 
 1. [Docker](https://docs.docker.com/engine/reference/commandline/cli/)
 2. [Docker compose](https://docs.docker.com/compose/#:~:text=Compose%20simplifies%20the%20control%20of,services%20from%20your%20configuration%20file.)
-3. [If deploying the documentation, you'll need npm and node](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
+3. **Node.js 20 LTS** and **npm** (for building React frontends and deploying documentation)
+4. **Java 17+** (if building the Java backend outside Docker)
+5. **MySQL 8.0.33+** (if using an external database instead of the Docker MySQL container)
 
 ## Deployment instructions
 
