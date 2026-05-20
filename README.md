@@ -101,6 +101,15 @@ Some of the features included in this project are a:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
+## Requirements
+
+Before getting started, ensure you have the following installed:
+
+- **Java**: Version 17 or later (required for Spring Boot 3)
+- **Node.js**: Version 20 LTS (for building React frontends)
+- **MySQL**: Version 8.0.33 or later (required for MySQL Connector 9.x compatibility)
+- **Docker**: Latest version (for containerized deployment)
+
 ## Getting Started
 
 To begin your journey, click the link below for our full walkthrough on our passkey application.

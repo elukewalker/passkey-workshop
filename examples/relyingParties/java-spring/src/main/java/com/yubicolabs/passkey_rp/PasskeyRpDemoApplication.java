@@ -26,7 +26,9 @@ public class PasskeyRpDemoApplication {
      * DB options
      */
     System.setProperty("datasource.type", "mysql");
-    System.setProperty("spring.jpa.hibernate.ddl-auto", "update");
+    // Changed to 'validate' for Hibernate 6 safety (Spring Boot 3)
+    // Use 'update' for development if schema auto-migration is needed
+    System.setProperty("spring.jpa.hibernate.ddl-auto", "validate");
     System.setProperty("spring.datasource.url", "jdbc:mysql://host.docker.internal:3306/passkeyStorage");
     System.setProperty("spring.datasource.username", "root");
     System.setProperty("spring.datasource.driver-class-name", "com.mysql.cj.jdbc.Driver");
