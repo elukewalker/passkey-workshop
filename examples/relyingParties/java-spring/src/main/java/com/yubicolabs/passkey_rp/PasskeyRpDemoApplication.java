@@ -26,8 +26,6 @@ public class PasskeyRpDemoApplication {
      * DB options
      */
     System.setProperty("datasource.type", "mysql");
-    // Spring Boot 3 / Hibernate 6: use 'update' for development, 'validate' for production
-    // Set SPRING_PROFILES_ACTIVE=production to enable strict validation
     String ddlAuto = System.getenv("SPRING_PROFILES_ACTIVE") != null
         && System.getenv("SPRING_PROFILES_ACTIVE").contains("production")
         ? "validate" : "update";

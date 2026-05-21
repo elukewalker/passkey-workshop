@@ -9,6 +9,8 @@ import java.util.Set;
 
 import jakarta.annotation.PostConstruct;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.yubico.fido.metadata.FidoMetadataDownloader;
@@ -24,6 +26,8 @@ import lombok.Getter;
 
 @Service
 public class RelyingPartyInstance {
+
+  private static final Logger log = LoggerFactory.getLogger(RelyingPartyInstance.class);
 
   @Getter
   private StorageInstance storageInstance;
@@ -90,7 +94,7 @@ public class RelyingPartyInstance {
      * Iterate through origins list
      */
 
-    Set<String> allowedOrigins = new HashSet<String>();
+    Set<String> allowedOrigins = new HashSet<>();
 
     for (int i = 0; i < originsList.length; i++) {
       allowedOrigins.add("http://" + originsList[i]);
@@ -169,7 +173,7 @@ public class RelyingPartyInstance {
          */
         String ALLOW_LIST_ENV = System.getenv("ALLOW_LIST_AAGUIDS");
 
-        System.out.println("Allow list configuration: " + ALLOW_LIST_ENV);
+        log.info("Allow list configuration: {}", ALLOW_LIST_ENV);
 
         if (!ALLOW_LIST_ENV.equalsIgnoreCase("")) {
           String[] ALLOW_LIST_SPLIT = ALLOW_LIST_ENV.split(",");
@@ -184,10 +188,7 @@ public class RelyingPartyInstance {
 
         return mds;
       } catch (Exception e) {
-        e.printStackTrace();
-        System.out.println("There was an issue resolving the FIDO MDS");
-        System.out.println("Opting to continue without the use of the MDS");
-
+        log.error("There was an issue resolving the FIDO MDS. Opting to continue without the use of the MDS", e);
         return null;
       }
     } else {
