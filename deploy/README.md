@@ -24,6 +24,9 @@ Except for the iOS clients, all components can be deployed using Docker containe
 To deploy the workshop, you will need to install some software.
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) for running server components
+- **Node.js 20 LTS** (if building React frontends outside Docker)
+- **Java 17+** (if building Java backend outside Docker)
+- **MySQL 8.0.33+** (if using an external database instead of the Docker MySQL container)
 
 and optionally:
 

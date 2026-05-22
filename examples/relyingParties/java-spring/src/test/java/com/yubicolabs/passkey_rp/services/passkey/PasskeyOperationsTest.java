@@ -1,0 +1,529 @@
+package com.yubicolabs.passkey_rp.services.passkey;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.Optional;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import com.yubico.webauthn.RelyingParty;
+import com.yubico.webauthn.RegistrationResult;
+import com.yubico.webauthn.data.ByteArray;
+import com.yubico.webauthn.data.PublicKeyCredentialCreationOptions;
+import com.yubico.webauthn.data.UserIdentity;
+import com.yubicolabs.passkey_rp.interfaces.AttestationRequestStorage;
+import com.yubicolabs.passkey_rp.interfaces.CredentialStorage;
+import com.yubicolabs.passkey_rp.models.api.AttestationOptionsRequest;
+import com.yubicolabs.passkey_rp.models.api.AttestationOptionsResponse;
+import com.yubicolabs.passkey_rp.models.api.AttestationResultRequest;
+import com.yubicolabs.passkey_rp.models.api.AttestationResultResponse;
+import com.yubicolabs.passkey_rp.models.common.AttestationOptions;
+import com.yubicolabs.passkey_rp.services.storage.StorageInstance;
+
+@ExtendWith(MockitoExtension.class)
+@org.mockito.junit.jupiter.MockitoSettings(strictness = org.mockito.quality.Strictness.LENIENT)
+@DisplayName("PasskeyOperations")
+class PasskeyOperationsTest {
+
+    @Mock
+    private RelyingPartyInstance relyingPartyInstance;
+
+    @Mock
+    private RelyingParty relyingParty;
+
+    @Mock
+    private StorageInstance storageInstance;
+
+    @Mock
+    private CredentialStorage credentialStorage;
+
+    @Mock
+    private AttestationRequestStorage attestationRequestStorage;
+
+    @Mock
+    private com.yubicolabs.passkey_rp.interfaces.AdvancedProtectionStatusStorage advancedProtectionStatusStorage;
+
+    private PasskeyOperations passkeyOperations;
+
+    @BeforeEach
+    void setUp() {
+        when(relyingPartyInstance.getRelyingParty()).thenReturn(relyingParty);
+        when(relyingPartyInstance.getStorageInstance()).thenReturn(storageInstance);
+        when(storageInstance.getCredentialStorage()).thenReturn(credentialStorage);
+        when(storageInstance.getAttestationRequestStorage()).thenReturn(attestationRequestStorage);
+        when(storageInstance.getAdvancedProtectionStatusStorage()).thenReturn(advancedProtectionStatusStorage);
+
+        passkeyOperations = new PasskeyOperations(relyingPartyInstance);
+    }
+
+    @Nested
+    @DisplayName("Registration Flow")
+    class RegistrationFlow {
+
+        @Test
+        @DisplayName("should_generate_valid_attestation_options_when_new_user_registers")
+        void should_generate_valid_attestation_options_when_new_user_registers() {
+            AttestationOptionsRequest request = AttestationOptionsRequest.builder()
+                    .userName("test@example.com")
+                    .displayName("Test User")
+                    .hints(Optional.empty())
+                    .build();
+
+            when(credentialStorage.getUserHandleForUsername(anyString())).thenReturn(Optional.empty());
+
+            UserIdentity mockUser = UserIdentity.builder()
+                    .name("test@example.com")
+                    .displayName("Test User")
+                    .id(new ByteArray(new byte[16]))
+                    .build();
+
+            PublicKeyCredentialCreationOptions mockPkc = PublicKeyCredentialCreationOptions.builder()
+                    .rp(com.yubico.webauthn.data.RelyingPartyIdentity.builder()
+                            .id("example.com")
+                            .name("Example RP")
+                            .build())
+                    .user(mockUser)
+                    .challenge(new ByteArray(new byte[32]))
+                    .pubKeyCredParams(java.util.Collections.singletonList(
+                            com.yubico.webauthn.data.PublicKeyCredentialParameters.ES256))
+                    .build();
+
+            when(relyingParty.startRegistration(any())).thenReturn(mockPkc);
+
+            AttestationOptionsResponse response = passkeyOperations.attestationOptions(request);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getRequestId()).isNotNull();
+            assertThat(response.getPublicKey()).isEqualTo(mockPkc);
+            verify(attestationRequestStorage).insert(any(), anyString());
+        }
+
+        @Test
+        @DisplayName("should_persist_credential_when_attestation_result_is_valid")
+        void should_persist_credential_when_attestation_result_is_valid() throws Exception {
+            String requestId = "test-request-id";
+            ByteArray userHandle = new ByteArray(new byte[16]);
+            ByteArray credentialId = new ByteArray(new byte[32]);
+
+            UserIdentity mockUser = UserIdentity.builder()
+                    .name("test@example.com")
+                    .displayName("Test User")
+                    .id(userHandle)
+                    .build();
+
+            PublicKeyCredentialCreationOptions mockRequest = PublicKeyCredentialCreationOptions.builder()
+                    .rp(com.yubico.webauthn.data.RelyingPartyIdentity.builder()
+                            .id("example.com")
+                            .name("Example RP")
+                            .build())
+                    .user(mockUser)
+                    .challenge(new ByteArray(new byte[32]))
+                    .pubKeyCredParams(java.util.Collections.singletonList(
+                            com.yubico.webauthn.data.PublicKeyCredentialParameters.ES256))
+                    .build();
+
+            AttestationOptions mockOptions = AttestationOptions.builder()
+                    .attestationRequest(mockRequest)
+                    .isActive(true)
+                    .build();
+
+            when(attestationRequestStorage.getIfPresent(requestId))
+                    .thenReturn(Optional.of(mockOptions));
+            when(advancedProtectionStatusStorage.getIfPresent(anyString())).thenReturn(Optional.empty());
+
+            RegistrationResult mockRegResult = org.mockito.Mockito.mock(RegistrationResult.class);
+            when(mockRegResult.getKeyId()).thenReturn(
+                    com.yubico.webauthn.data.PublicKeyCredentialDescriptor.builder()
+                            .id(credentialId)
+                            .build());
+            when(mockRegResult.getPublicKeyCose()).thenReturn(new ByteArray(new byte[77]));
+            when(mockRegResult.getSignatureCount()).thenReturn(0L);
+            when(mockRegResult.isAttestationTrusted()).thenReturn(false);
+
+            when(relyingParty.finishRegistration(any())).thenReturn(mockRegResult);
+            when(credentialStorage.addRegistration(any())).thenReturn(true);
+
+            @SuppressWarnings("unchecked")
+            com.yubico.webauthn.data.PublicKeyCredential<
+                    com.yubico.webauthn.data.AuthenticatorAttestationResponse,
+                    com.yubico.webauthn.data.ClientRegistrationExtensionOutputs> mockCredential =
+                    org.mockito.Mockito.mock(com.yubico.webauthn.data.PublicKeyCredential.class);
+
+            AttestationResultRequest request = new AttestationResultRequest();
+            request.setRequestId(requestId);
+            request.setMakeCredentialResult(mockCredential);
+
+            AttestationResultResponse response = passkeyOperations.attestationResult(request);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getStatus()).isEqualTo("created");
+            assertThat(response.getCredential()).isNotNull();
+            assertThat(response.getCredential().getId()).isEqualTo(credentialId.getBase64Url());
+            verify(attestationRequestStorage).invalidate(requestId);
+            verify(credentialStorage).addRegistration(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Assertion Flow")
+    class AssertionFlow {
+
+        @Mock
+        private com.yubicolabs.passkey_rp.interfaces.AssertionRequestStorage assertionRequestStorage;
+
+        @BeforeEach
+        void setUpAssertion() {
+            when(storageInstance.getAssertionRequestStorage()).thenReturn(assertionRequestStorage);
+        }
+
+        @Test
+        @DisplayName("should_generate_valid_assertion_options_when_user_authenticates")
+        void should_generate_valid_assertion_options_when_user_authenticates() {
+            com.yubicolabs.passkey_rp.models.api.AssertionOptionsRequest request =
+                    com.yubicolabs.passkey_rp.models.api.AssertionOptionsRequest.builder()
+                            .userName("test@example.com")
+                            .hints(Optional.empty())
+                            .build();
+
+            com.yubico.webauthn.data.PublicKeyCredentialRequestOptions mockPkro =
+                    com.yubico.webauthn.data.PublicKeyCredentialRequestOptions.builder()
+                            .challenge(new ByteArray(new byte[32]))
+                            .build();
+
+            com.yubico.webauthn.AssertionRequest mockAssertionRequest =
+                    org.mockito.Mockito.mock(com.yubico.webauthn.AssertionRequest.class);
+            when(mockAssertionRequest.getPublicKeyCredentialRequestOptions()).thenReturn(mockPkro);
+
+            when(relyingParty.startAssertion(any())).thenReturn(mockAssertionRequest);
+
+            com.yubicolabs.passkey_rp.models.api.AssertionOptionsResponse response =
+                    passkeyOperations.assertionOptions(request);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getRequestId()).isNotNull();
+            assertThat(response.getPublicKey()).isEqualTo(mockPkro);
+            verify(assertionRequestStorage).insert(any(), anyString());
+        }
+
+        @Test
+        @DisplayName("should_validate_assertion_and_return_loa_when_assertion_result_is_valid")
+        void should_validate_assertion_and_return_loa_when_assertion_result_is_valid() throws Exception {
+            String requestId = "test-request-id";
+            ByteArray credentialId = new ByteArray(new byte[32]);
+            ByteArray userHandle = new ByteArray(new byte[16]);
+
+            com.yubico.webauthn.data.PublicKeyCredentialRequestOptions mockPkro =
+                    com.yubico.webauthn.data.PublicKeyCredentialRequestOptions.builder()
+                            .challenge(new ByteArray(new byte[32]))
+                            .build();
+
+            com.yubico.webauthn.AssertionRequest mockAssertionRequest =
+                    com.yubico.webauthn.AssertionRequest.builder()
+                            .publicKeyCredentialRequestOptions(mockPkro)
+                            .username(Optional.of("test@example.com"))
+                            .build();
+
+            com.yubicolabs.passkey_rp.models.common.AssertionOptions mockOptions =
+                    com.yubicolabs.passkey_rp.models.common.AssertionOptions.builder()
+                            .assertionRequest(mockAssertionRequest)
+                            .isActive(true)
+                            .build();
+
+            when(assertionRequestStorage.getIfPresent(requestId))
+                    .thenReturn(Optional.of(mockOptions));
+
+            com.yubico.webauthn.AssertionResult mockAssertionResult =
+                    org.mockito.Mockito.mock(com.yubico.webauthn.AssertionResult.class);
+            when(mockAssertionResult.isSuccess()).thenReturn(true);
+            when(mockAssertionResult.getCredential()).thenReturn(
+                    com.yubico.webauthn.RegisteredCredential.builder()
+                            .credentialId(credentialId)
+                            .userHandle(userHandle)
+                            .publicKeyCose(new ByteArray(new byte[77]))
+                            .build());
+
+            when(relyingParty.finishAssertion(any())).thenReturn(mockAssertionResult);
+
+            com.yubicolabs.passkey_rp.models.common.CredentialRegistration mockCredential =
+                    com.yubicolabs.passkey_rp.models.common.CredentialRegistration.builder()
+                            .credential(com.yubico.webauthn.RegisteredCredential.builder()
+                                    .credentialId(credentialId)
+                                    .userHandle(userHandle)
+                                    .publicKeyCose(new ByteArray(new byte[77]))
+                                    .build())
+                            .isHighAssurance(true)
+                            .build();
+
+            when(credentialStorage.getByCredentialId(credentialId))
+                    .thenReturn(java.util.Collections.singleton(mockCredential));
+
+            @SuppressWarnings("unchecked")
+            com.yubico.webauthn.data.PublicKeyCredential<
+                    com.yubico.webauthn.data.AuthenticatorAssertionResponse,
+                    com.yubico.webauthn.data.ClientAssertionExtensionOutputs> mockAssertionCredential =
+                    org.mockito.Mockito.mock(com.yubico.webauthn.data.PublicKeyCredential.class);
+
+            com.yubicolabs.passkey_rp.models.api.AssertionResultRequest request =
+                    new com.yubicolabs.passkey_rp.models.api.AssertionResultRequest();
+            request.setRequestId(requestId);
+            request.setAssertionResult(mockAssertionCredential);
+
+            com.yubicolabs.passkey_rp.models.api.AssertionResultResponse response =
+                    passkeyOperations.assertionResponse(request);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getStatus()).isEqualTo("ok");
+            assertThat(response.getLoa()).isEqualTo(
+                    com.yubicolabs.passkey_rp.models.api.AssertionResultResponse.loaEnum.HIGH);
+            verify(assertionRequestStorage).invalidate(requestId);
+            verify(relyingParty).finishAssertion(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Error Paths")
+    class ErrorPaths {
+
+        @Mock
+        private com.yubicolabs.passkey_rp.interfaces.AssertionRequestStorage assertionRequestStorage;
+
+        @BeforeEach
+        void setUpErrorPaths() {
+            when(storageInstance.getAssertionRequestStorage()).thenReturn(assertionRequestStorage);
+        }
+
+        @Test
+        @DisplayName("should_throw_exception_when_attestation_request_id_not_found")
+        void should_throw_exception_when_attestation_request_id_not_found() {
+            when(attestationRequestStorage.getIfPresent(anyString())).thenReturn(Optional.empty());
+
+            @SuppressWarnings("unchecked")
+            com.yubico.webauthn.data.PublicKeyCredential<
+                    com.yubico.webauthn.data.AuthenticatorAttestationResponse,
+                    com.yubico.webauthn.data.ClientRegistrationExtensionOutputs> mockCredential =
+                    org.mockito.Mockito.mock(com.yubico.webauthn.data.PublicKeyCredential.class);
+
+            com.yubicolabs.passkey_rp.models.api.AttestationResultRequest request =
+                    new com.yubicolabs.passkey_rp.models.api.AttestationResultRequest();
+            request.setRequestId("invalid-id");
+            request.setMakeCredentialResult(mockCredential);
+
+            assertThatThrownBy(() -> passkeyOperations.attestationResult(request))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessage("This is not a valid registration requestId");
+        }
+
+        @Test
+        @DisplayName("should_throw_exception_when_attestation_request_no_longer_active")
+        void should_throw_exception_when_attestation_request_no_longer_active() {
+            String requestId = "test-request-id";
+
+            PublicKeyCredentialCreationOptions mockRequest = PublicKeyCredentialCreationOptions.builder()
+                    .rp(com.yubico.webauthn.data.RelyingPartyIdentity.builder()
+                            .id("example.com")
+                            .name("Example RP")
+                            .build())
+                    .user(UserIdentity.builder()
+                            .name("test@example.com")
+                            .displayName("Test User")
+                            .id(new ByteArray(new byte[16]))
+                            .build())
+                    .challenge(new ByteArray(new byte[32]))
+                    .pubKeyCredParams(java.util.Collections.singletonList(
+                            com.yubico.webauthn.data.PublicKeyCredentialParameters.ES256))
+                    .build();
+
+            com.yubicolabs.passkey_rp.models.common.AttestationOptions mockOptions =
+                    com.yubicolabs.passkey_rp.models.common.AttestationOptions.builder()
+                            .attestationRequest(mockRequest)
+                            .isActive(false)
+                            .build();
+
+            when(attestationRequestStorage.getIfPresent(requestId)).thenReturn(Optional.of(mockOptions));
+
+            @SuppressWarnings("unchecked")
+            com.yubico.webauthn.data.PublicKeyCredential<
+                    com.yubico.webauthn.data.AuthenticatorAttestationResponse,
+                    com.yubico.webauthn.data.ClientRegistrationExtensionOutputs> mockCredential =
+                    org.mockito.Mockito.mock(com.yubico.webauthn.data.PublicKeyCredential.class);
+
+            com.yubicolabs.passkey_rp.models.api.AttestationResultRequest request =
+                    new com.yubicolabs.passkey_rp.models.api.AttestationResultRequest();
+            request.setRequestId(requestId);
+            request.setMakeCredentialResult(mockCredential);
+
+            assertThatThrownBy(() -> passkeyOperations.attestationResult(request))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessage("Registration request is no longer active");
+        }
+
+        @Test
+        @DisplayName("should_throw_exception_when_assertion_request_not_found")
+        void should_throw_exception_when_assertion_request_not_found() {
+            when(assertionRequestStorage.getIfPresent(anyString())).thenReturn(Optional.empty());
+
+            @SuppressWarnings("unchecked")
+            com.yubico.webauthn.data.PublicKeyCredential<
+                    com.yubico.webauthn.data.AuthenticatorAssertionResponse,
+                    com.yubico.webauthn.data.ClientAssertionExtensionOutputs> mockCredential =
+                    org.mockito.Mockito.mock(com.yubico.webauthn.data.PublicKeyCredential.class);
+
+            com.yubicolabs.passkey_rp.models.api.AssertionResultRequest request =
+                    new com.yubicolabs.passkey_rp.models.api.AssertionResultRequest();
+            request.setRequestId("invalid-id");
+            request.setAssertionResult(mockCredential);
+
+            assertThatThrownBy(() -> passkeyOperations.assertionResponse(request))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessage("Registration request not present");
+        }
+
+        @Test
+        @DisplayName("should_throw_exception_when_assertion_validation_fails")
+        void should_throw_exception_when_assertion_validation_fails() throws Exception {
+            String requestId = "test-request-id";
+
+            com.yubico.webauthn.data.PublicKeyCredentialRequestOptions mockPkro =
+                    com.yubico.webauthn.data.PublicKeyCredentialRequestOptions.builder()
+                            .challenge(new ByteArray(new byte[32]))
+                            .build();
+
+            com.yubico.webauthn.AssertionRequest mockAssertionRequest =
+                    com.yubico.webauthn.AssertionRequest.builder()
+                            .publicKeyCredentialRequestOptions(mockPkro)
+                            .username(Optional.of("test@example.com"))
+                            .build();
+
+            com.yubicolabs.passkey_rp.models.common.AssertionOptions mockOptions =
+                    com.yubicolabs.passkey_rp.models.common.AssertionOptions.builder()
+                            .assertionRequest(mockAssertionRequest)
+                            .isActive(true)
+                            .build();
+
+            when(assertionRequestStorage.getIfPresent(requestId)).thenReturn(Optional.of(mockOptions));
+
+            com.yubico.webauthn.AssertionResult mockAssertionResult =
+                    org.mockito.Mockito.mock(com.yubico.webauthn.AssertionResult.class);
+            when(mockAssertionResult.isSuccess()).thenReturn(false);
+
+            when(relyingParty.finishAssertion(any())).thenReturn(mockAssertionResult);
+
+            @SuppressWarnings("unchecked")
+            com.yubico.webauthn.data.PublicKeyCredential<
+                    com.yubico.webauthn.data.AuthenticatorAssertionResponse,
+                    com.yubico.webauthn.data.ClientAssertionExtensionOutputs> mockCredential =
+                    org.mockito.Mockito.mock(com.yubico.webauthn.data.PublicKeyCredential.class);
+
+            com.yubicolabs.passkey_rp.models.api.AssertionResultRequest request =
+                    new com.yubicolabs.passkey_rp.models.api.AssertionResultRequest();
+            request.setRequestId(requestId);
+            request.setAssertionResult(mockCredential);
+
+            assertThatThrownBy(() -> passkeyOperations.assertionResponse(request))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessage("The assertion validation failed. Please try again");
+        }
+    }
+
+    @Nested
+    @DisplayName("Credential Lifecycle")
+    class CredentialLifecycle {
+
+        @Test
+        @DisplayName("should_delete_credential_when_valid_credential_id_provided")
+        void should_delete_credential_when_valid_credential_id_provided() throws Exception {
+            String credentialIdBase64 = new ByteArray(new byte[32]).getBase64Url();
+            ByteArray credentialId = ByteArray.fromBase64Url(credentialIdBase64);
+            ByteArray userHandle = new ByteArray(new byte[16]);
+
+            com.yubicolabs.passkey_rp.models.common.CredentialRegistration mockCredential =
+                    com.yubicolabs.passkey_rp.models.common.CredentialRegistration.builder()
+                            .credential(com.yubico.webauthn.RegisteredCredential.builder()
+                                    .credentialId(credentialId)
+                                    .userHandle(userHandle)
+                                    .publicKeyCose(new ByteArray(new byte[77]))
+                                    .build())
+                            .build();
+
+            when(credentialStorage.getByCredentialId(credentialId))
+                    .thenReturn(java.util.Collections.singleton(mockCredential));
+            when(credentialStorage.removeRegistration(credentialId, userHandle))
+                    .thenReturn(true);
+
+            com.yubicolabs.passkey_rp.models.api.UserCredentialDelete request =
+                    new com.yubicolabs.passkey_rp.models.api.UserCredentialDelete()
+                            .id(credentialIdBase64);
+
+            com.yubicolabs.passkey_rp.models.api.UserCredentialDeleteResponse response =
+                    passkeyOperations.deleteCredential(request);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getResult()).isEqualTo("deleted");
+            verify(credentialStorage).removeRegistration(credentialId, userHandle);
+        }
+
+        @Test
+        @DisplayName("should_throw_exception_when_deleting_nonexistent_credential")
+        void should_throw_exception_when_deleting_nonexistent_credential() throws Exception {
+            String credentialIdBase64 = new ByteArray(new byte[32]).getBase64Url();
+            ByteArray credentialId = ByteArray.fromBase64Url(credentialIdBase64);
+
+            when(credentialStorage.getByCredentialId(credentialId))
+                    .thenReturn(java.util.Collections.emptyList());
+
+            com.yubicolabs.passkey_rp.models.api.UserCredentialDelete request =
+                    new com.yubicolabs.passkey_rp.models.api.UserCredentialDelete()
+                            .id(credentialIdBase64);
+
+            assertThatThrownBy(() -> passkeyOperations.deleteCredential(request))
+                    .isInstanceOf(Exception.class)
+                    .hasMessageContaining("This credential does not exists");
+        }
+
+        @Test
+        @DisplayName("should_retrieve_user_credentials_when_user_exists")
+        void should_retrieve_user_credentials_when_user_exists() throws Exception {
+            String userName = "test@example.com";
+            ByteArray credentialId = new ByteArray(new byte[32]);
+            ByteArray userHandle = new ByteArray(new byte[16]);
+
+            com.yubicolabs.passkey_rp.models.common.CredentialRegistration mockCredential =
+                    com.yubicolabs.passkey_rp.models.common.CredentialRegistration.builder()
+                            .credential(com.yubico.webauthn.RegisteredCredential.builder()
+                                    .credentialId(credentialId)
+                                    .userHandle(userHandle)
+                                    .publicKeyCose(new ByteArray(new byte[77]))
+                                    .build())
+                            .credentialNickname(Optional.of("My Security Key"))
+                            .registrationTime(java.time.Instant.now())
+                            .lastUsedTime(java.time.Instant.now())
+                            .iconURI(Optional.empty())
+                            .isHighAssurance(true)
+                            .state(com.yubicolabs.passkey_rp.models.common.CredentialRegistration.StateEnum.ENABLED)
+                            .build();
+
+            when(credentialStorage.getRegistrationsByUsername(userName))
+                    .thenReturn(java.util.Collections.singleton(mockCredential));
+
+            com.yubicolabs.passkey_rp.models.api.UserCredentialsResponse response =
+                    passkeyOperations.getUserCredentials(userName);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getCredentials()).hasSize(1);
+            assertThat(response.getCredentials().get(0).getId()).isEqualTo(credentialId.getBase64Url());
+            assertThat(response.getCredentials().get(0).getNickName()).isEqualTo("My Security Key");
+            assertThat(response.getCredentials().get(0).getIsHighAssurance()).isTrue();
+        }
+    }
+}

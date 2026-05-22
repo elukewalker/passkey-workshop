@@ -5,7 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonTypeName;
 import java.time.OffsetDateTime;
 import org.springframework.format.annotation.DateTimeFormat;
-import javax.validation.Valid;
+import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 
