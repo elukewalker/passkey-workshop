@@ -435,4 +435,95 @@ class PasskeyOperationsTest {
                     .hasMessage("The assertion validation failed. Please try again");
         }
     }
+
+    @Nested
+    @DisplayName("Credential Lifecycle")
+    class CredentialLifecycle {
+
+        @Test
+        @DisplayName("should_delete_credential_when_valid_credential_id_provided")
+        void should_delete_credential_when_valid_credential_id_provided() throws Exception {
+            String credentialIdBase64 = new ByteArray(new byte[32]).getBase64Url();
+            ByteArray credentialId = ByteArray.fromBase64Url(credentialIdBase64);
+            ByteArray userHandle = new ByteArray(new byte[16]);
+
+            com.yubicolabs.passkey_rp.models.common.CredentialRegistration mockCredential =
+                    com.yubicolabs.passkey_rp.models.common.CredentialRegistration.builder()
+                            .credential(com.yubico.webauthn.RegisteredCredential.builder()
+                                    .credentialId(credentialId)
+                                    .userHandle(userHandle)
+                                    .publicKeyCose(new ByteArray(new byte[77]))
+                                    .build())
+                            .build();
+
+            when(credentialStorage.getByCredentialId(credentialId))
+                    .thenReturn(java.util.Collections.singleton(mockCredential));
+            when(credentialStorage.removeRegistration(credentialId, userHandle))
+                    .thenReturn(true);
+
+            com.yubicolabs.passkey_rp.models.api.UserCredentialDelete request =
+                    new com.yubicolabs.passkey_rp.models.api.UserCredentialDelete()
+                            .id(credentialIdBase64);
+
+            com.yubicolabs.passkey_rp.models.api.UserCredentialDeleteResponse response =
+                    passkeyOperations.deleteCredential(request);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getResult()).isEqualTo("deleted");
+            verify(credentialStorage).removeRegistration(credentialId, userHandle);
+        }
+
+        @Test
+        @DisplayName("should_throw_exception_when_deleting_nonexistent_credential")
+        void should_throw_exception_when_deleting_nonexistent_credential() throws Exception {
+            String credentialIdBase64 = new ByteArray(new byte[32]).getBase64Url();
+            ByteArray credentialId = ByteArray.fromBase64Url(credentialIdBase64);
+
+            when(credentialStorage.getByCredentialId(credentialId))
+                    .thenReturn(java.util.Collections.emptyList());
+
+            com.yubicolabs.passkey_rp.models.api.UserCredentialDelete request =
+                    new com.yubicolabs.passkey_rp.models.api.UserCredentialDelete()
+                            .id(credentialIdBase64);
+
+            assertThatThrownBy(() -> passkeyOperations.deleteCredential(request))
+                    .isInstanceOf(Exception.class)
+                    .hasMessageContaining("This credential does not exists");
+        }
+
+        @Test
+        @DisplayName("should_retrieve_user_credentials_when_user_exists")
+        void should_retrieve_user_credentials_when_user_exists() throws Exception {
+            String userName = "test@example.com";
+            ByteArray credentialId = new ByteArray(new byte[32]);
+            ByteArray userHandle = new ByteArray(new byte[16]);
+
+            com.yubicolabs.passkey_rp.models.common.CredentialRegistration mockCredential =
+                    com.yubicolabs.passkey_rp.models.common.CredentialRegistration.builder()
+                            .credential(com.yubico.webauthn.RegisteredCredential.builder()
+                                    .credentialId(credentialId)
+                                    .userHandle(userHandle)
+                                    .publicKeyCose(new ByteArray(new byte[77]))
+                                    .build())
+                            .credentialNickname(Optional.of("My Security Key"))
+                            .registrationTime(java.time.Instant.now())
+                            .lastUsedTime(java.time.Instant.now())
+                            .iconURI(Optional.empty())
+                            .isHighAssurance(true)
+                            .state(com.yubicolabs.passkey_rp.models.common.CredentialRegistration.StateEnum.ENABLED)
+                            .build();
+
+            when(credentialStorage.getRegistrationsByUsername(userName))
+                    .thenReturn(java.util.Collections.singleton(mockCredential));
+
+            com.yubicolabs.passkey_rp.models.api.UserCredentialsResponse response =
+                    passkeyOperations.getUserCredentials(userName);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getCredentials()).hasSize(1);
+            assertThat(response.getCredentials().get(0).getId()).isEqualTo(credentialId.getBase64Url());
+            assertThat(response.getCredentials().get(0).getNickName()).isEqualTo("My Security Key");
+            assertThat(response.getCredentials().get(0).getIsHighAssurance()).isTrue();
+        }
+    }
 }
